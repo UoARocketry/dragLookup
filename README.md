@@ -43,8 +43,8 @@ python "01 generate header AIRBRAKE.py" --metric dragCoeff --plot lines
 ### BODY headers
 
 Input format (per CSV):
-- `Atitude (Sealevel)`
 - `Atitude (AGL)`
+- `Atitude (Sealevel)`
 - `Vertical Velocity (m/s)`
 - `Drag Force` or `Drag Coefficient`
 
