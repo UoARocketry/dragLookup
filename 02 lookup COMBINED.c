@@ -247,6 +247,47 @@ float body_lookup(float input_value, BodyLookupInput input_kind) {
 }
 
 /*******************************************************************************
+ * Combined Lookup
+ ******************************************************************************/
+
+/*
+ * Calculates the total drag coefficient by combining airbrake and body values.
+ *
+ * Takes altitude, speed, and airbrake deployment as input.
+ * Returns -1.0f if any of the underlying lookups fail.
+ */
+float get_total_drag_coefficient(float altitude_m, float speed,
+                                 float deployment_percent) {
+  // Perform a 2D lookup for the airbrake's drag coefficient.
+  float airbrake_cd = airbrake_lookup(altitude_m, speed, deployment_percent);
+  printf("Single Airbrake Cd is: %.4f\n", airbrake_cd);
+  if (airbrake_cd < 0.0f) {
+    return -1.0f;  // Propagate error from airbrake lookup.
+  }
+
+  // Perform a 1D lookup for the body's drag coefficient.
+  // Per request, the primary lookup is by velocity.
+  float body_cd = body_lookup(speed, BODY_LOOKUP_BY_VERTICAL_VELOCITY);
+  printf("Body Cd is: %.4f\n", body_cd);
+
+  /*
+  // Alternate body lookup using altitude:
+  float body_cd_alt = body_lookup(altitude_m, BODY_LOOKUP_BY_ALTITUDE_SEALEVEL);
+  if (body_cd_alt < 0.0f) {
+      return -1.0f;
+  }
+  */
+
+  if (body_cd < 0.0f) {
+    return -1.0f;  // Propagate error from body lookup.
+  }
+
+  // Combine the two values using the specified formula.
+  printf("Combined Cd is: %.4f\n", (airbrake_cd * 3.0) + body_cd);
+  return (airbrake_cd * 3.0f) + body_cd;
+}
+
+/*******************************************************************************
  * Main Test Harness
  ******************************************************************************/
 
@@ -297,6 +338,16 @@ int main(void) {
     printf("%s\n", tc->label);
     printf("   result (drag coefficient) = %.9f\n", result);
   }
+
+  printf("\n--- Running Total Drag Coefficient tests ---\n");
+  // Test case 1: Valid inputs
+  float total_cd_test_1 = get_total_drag_coefficient(400.0f, 55.6f, 30.0f);
+  printf("Total CD for alt=400m, speed=55.6, deployment=30 is %.4f\n",
+         total_cd_test_1);
+
+  // Test case 2: Invalid altitude to trigger an error
+  float total_cd_test_2 = get_total_drag_coefficient(999.0f, 55.6f, 30.0f);
+  printf("Total CD for alt=999m (error case) is %.9f\n", total_cd_test_2);
 
   return 0;
 }

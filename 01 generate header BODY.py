@@ -10,8 +10,8 @@ from pathlib import Path
 class BodyLookupSeries:
 	source_file: Path
 	metric: str
+	agl_sealevel_diff_m: float
 	altitude_sealevel_m: list[float]
-	altitude_agl_m: list[float]
 	vertical_velocity_m_s: list[float]
 	values: list[float]
 
@@ -56,28 +56,26 @@ def read_body_lookup_csv(file_path: str | Path) -> BodyLookupSeries:
 		raise ValueError(f"CSV '{path}' must include header plus at least one data row.")
 
 	header = [cell.strip() for cell in rows[0]]
-	if len(header) < 4:
-		raise ValueError(f"CSV '{path}' must have 4 columns.")
+	if len(header) < 3:
+		raise ValueError(f"CSV '{path}' must have at least 3 columns.")
 
 	altitude_sealevel_m: list[float] = []
-	altitude_agl_m: list[float] = []
 	vertical_velocity_m_s: list[float] = []
 	values: list[float] = []
 
 	for row_index, row in enumerate(rows[1:], start=2):
 		if not row or not any(cell.strip() for cell in row):
 			break
-		if len(row) < 4:
-			raise ValueError(f"Row {row_index} in '{path}' has fewer than 4 columns.")
+		if len(row) < 3:
+			raise ValueError(f"Row {row_index} in '{path}' has fewer than 3 columns.")
 
 		altitude_sealevel_m.append(
 			_to_float(row[0], field_name=f"altitude_sealevel_m row {row_index}")
 		)
-		altitude_agl_m.append(_to_float(row[1], field_name=f"altitude_agl_m row {row_index}"))
 		vertical_velocity_m_s.append(
-			_to_float(row[2], field_name=f"vertical_velocity_m_s row {row_index}")
+			_to_float(row[1], field_name=f"vertical_velocity_m_s row {row_index}")
 		)
-		values.append(_to_float(row[3], field_name=f"value row {row_index}"))
+		values.append(_to_float(row[2], field_name=f"value row {row_index}"))
 
 	if not values:
 		raise ValueError(f"No data rows found in '{path}'.")
@@ -85,8 +83,8 @@ def read_body_lookup_csv(file_path: str | Path) -> BodyLookupSeries:
 	return BodyLookupSeries(
 		source_file=path,
 		metric=_metric_from_filename(path),
+		agl_sealevel_diff_m=0.0,  # This will be set from args later
 		altitude_sealevel_m=altitude_sealevel_m,
-		altitude_agl_m=altitude_agl_m,
 		vertical_velocity_m_s=vertical_velocity_m_s,
 		values=values,
 	)
@@ -104,7 +102,6 @@ def _render_header(series: BodyLookupSeries) -> str:
 	value_name = "BODY_CD"
 	table_name = "BODY_DRAGCOEFF_TABLE"
 	sealevel_text = _join_c_floats(series.altitude_sealevel_m)
-	agl_text = _join_c_floats(series.altitude_agl_m)
 	speed_text = _join_c_floats(series.vertical_velocity_m_s)
 	value_text = _join_c_floats(series.values)
 
@@ -115,19 +112,18 @@ def _render_header(series: BodyLookupSeries) -> str:
 	lines.append("// Auto-generated from BODY lookup CSV files.")
 	lines.append("")
 	lines.append(f"#define BODY_{upper_metric}_ROW_COUNT {row_count}")
+	lines.append(
+		f"#define BODY_AGL_SEALEVEL_DIFF_M {_c_float(series.agl_sealevel_diff_m)}"
+	)
 	lines.append("")
 	lines.append("typedef struct {")
 	lines.append("    float altitudeSealevelM;")
-	lines.append("    float altitudeAglM;")
 	lines.append("    float verticalVelocityMps;")
 	lines.append(f"    float {value_name};")
 	lines.append("} BodyLookupRow;")
 	lines.append("")
 	lines.append(f"static const float BODY_ALTITUDE_SEALEVEL_M[{row_count}] = {{")
 	lines.append(sealevel_text)
-	lines.append("};")
-	lines.append(f"static const float BODY_ALTITUDE_AGL_M[{row_count}] = {{")
-	lines.append(agl_text)
 	lines.append("};")
 	lines.append(f"static const float BODY_VERTICAL_VELOCITY_MPS[{row_count}] = {{")
 	lines.append(speed_text)
@@ -141,7 +137,6 @@ def _render_header(series: BodyLookupSeries) -> str:
 		lines.append(
 			"    {"
 			+ f"{_c_float(series.altitude_sealevel_m[index])}, "
-			+ f"{_c_float(series.altitude_agl_m[index])}, "
 			+ f"{_c_float(series.vertical_velocity_m_s[index])}, "
 			+ f"{_c_float(series.values[index])}"
 			+ "},"
@@ -172,6 +167,12 @@ def _parse_args() -> argparse.Namespace:
 		default="generated",
 		help="Output directory for generated .h files.",
 	)
+	parser.add_argument(
+		"--agl-sealevel-diff",
+		type=float,
+		required=True,
+		help="Difference in meters between AGL and sea level altitude (AGL - sea level).",
+	)
 	return parser.parse_args()
 
 
@@ -187,6 +188,7 @@ if __name__ == "__main__":
 	output_dir = base_dir / args.headers_dir
 	for file_path in files:
 		series = read_body_lookup_csv(file_path)
+		series.agl_sealevel_diff_m = args.agl_sealevel_diff
 		if series.metric != "dragCoeff":
 			continue
 		header_path = write_body_header(series, output_dir)

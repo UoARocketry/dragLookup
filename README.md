@@ -1,22 +1,28 @@
 # dragLookup
 
-Lookup table generation and runtime lookup code for AIRBRAKE and BODY drag data.
+This project provides tools to generate C header files from drag coefficient lookup tables and C functions to perform runtime lookups against that data. It supports separate lookups for the rocket body and airbrakes, and provides a combined calculation.
 
-Note: uses sea level altitude inputs. velocity has to be in the vertical axis.
-Removed support for drag force lookup generation and lookup.
+The system is designed to use sea-level altitude and vertical velocity as primary inputs.
+
+## Simulation Assumptions:
+- Airbrakes: The CFD model uses agl altitude inputs, so the agl sea level difference is already accounted for in its data.
+- Body: This is derived from open rocket, which outputs sea level altitudes, so the agl sea level difference is not accounted for in its data. When compiling the BODY lookup table, the agl sea level difference must be provided to the header generation script. For the Orini launch site, this is 40m.
 
 ## Project Files
 
 - `01 generate header AIRBRAKE.py`: reads AIRBRAKE CSV tables and generates AIRBRAKE headers.
 - `01 generate header BODY.py`: reads BODY CSV series and generates BODY headers.
-- `02 lookup AIRBRAKE.c`: AIRBRAKE runtime lookup with interpolation/clamping/error rules.
-- `02 lookup BODY.c`: BODY runtime lookup by sea-level altitude or vertical velocity.
+- `02 lookup COMBINED.c`: Combined runtime lookup for AIRBRAKE and BODY with interpolation, clamping, and error handling.
 - `csv/`: source CSV data.
 - `generated/`: generated `.h` lookup headers.
 
 ## Header Generation (`01*` files)
 
+The Python scripts in the root directory parse CSV files and generate C header files containing the lookup tables.
+
 ### AIRBRAKE headers
+
+Direct copy pastes from the .xlsx file. Open both in excel and copy the relevant cells into a CSV file. The first 4 rows are metadata, and the rest is a 2D table of values.
 
 Input format (per CSV):
 - Row 1: altitude range
@@ -27,7 +33,7 @@ Input format (per CSV):
 Generate headers:
 
 ```bash
-python "01 generate header AIRBRAKE.py" --plot none --write-headers --headers-dir generated
+python "01 generate header AIRBRAKE.py" --write-headers --headers-dir generated
 ```
 
 Outputs:
@@ -42,17 +48,20 @@ python "01 generate header AIRBRAKE.py" --plot lines
 
 ### BODY headers
 
+Have to remove the AGL column.
+
 Input format (per CSV):
-- `Atitude (AGL)`
 - `Atitude (Sealevel)`
 - `Vertical Velocity (m/s)`
-- `Drag Force` or `Drag Coefficient`
+- `Drag Coefficient`
 
 Generate headers:
 
 ```bash
-python "01 generate header BODY.py" --pattern "BODY_*.csv" --headers-dir generated
+python "01 generate header BODY.py" --pattern "BODY_*.csv" --headers-dir generated --agl-sealevel-diff 40.0
 ```
+
+Note: agl sealevel diff is 40m for the Orini Launch Site
 
 Outputs:
 - `generated/body_dragCoefficient_lookup.h`
@@ -105,14 +114,8 @@ Behavior summary:
 
 ## Build Checks
 
-Compile AIRBRAKE lookup:
+Compile lookup COMBINED .c:
 
 ```bash
-gcc -std=c11 -Wall -Wextra -pedantic "02 lookup AIRBRAKE.c" -o /tmp/airbrake_lookup
-```
-
-Compile BODY lookup:
-
-```bash
-gcc -std=c11 -Wall -Wextra -pedantic "02 lookup BODY.c" -o /tmp/body_lookup
+gcc -std=c11 -Wall -Wextra -pedantic "02 lookup COMBINED.c" -o /tmp/airbrake_lookup
 ```
