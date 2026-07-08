@@ -3,19 +3,14 @@
  *
  * Usage:
  * - Main API:
- *     float body_lookup(float input_value, BodyLookupInput input_kind,
- *                       BodyLookupMetric metric);
+ *     float body_lookup(float input_value, BodyLookupInput input_kind);
  * - Convenience wrappers:
  *     body_lookup_by_altitude(...)
  *     body_lookup_by_vertical_velocity(...)
- *     body_drag_coefficient_from_altitude(...)
- *     body_drag_force_from_altitude(...)
- *     body_drag_coefficient_from_velocity(...)
- *     body_drag_force_from_velocity(...)
  *
  * Behavior:
  * - Interpolates along a single selected axis (altitude sea level or velocity).
- * - Supports drag coefficient and drag force from the same input axis.
+ * - Looks up drag coefficient from the input axis.
  * - Values outside axis bounds are clamped to the nearest endpoint.
  */
 
@@ -24,39 +19,18 @@
 
 #include "generated/body_dragCoefficient_lookup.h"
 
-// Remap duplicated symbols so both generated headers can coexist.
-#define BodyLookupRow BodyForceLookupRow
-#define BODY_ALTITUDE_SEALEVEL_M BODY_FORCE_ALTITUDE_SEALEVEL_M
-#define BODY_ALTITUDE_AGL_M BODY_FORCE_ALTITUDE_AGL_M
-#define BODY_VERTICAL_VELOCITY_MPS BODY_FORCE_VERTICAL_VELOCITY_MPS
-#include "generated/body_dragForce_lookup.h"
-#undef BodyLookupRow
-#undef BODY_ALTITUDE_SEALEVEL_M
-#undef BODY_ALTITUDE_AGL_M
-#undef BODY_VERTICAL_VELOCITY_MPS
-
-_Static_assert(BODY_DRAGCOEFF_ROW_COUNT == BODY_DRAGFORCE_ROW_COUNT,
-               "BODY coefficient/force table sizes must match.");
-
 typedef enum {
   BODY_LOOKUP_BY_ALTITUDE_SEALEVEL = 0,
   BODY_LOOKUP_BY_VERTICAL_VELOCITY = 1,
 } BodyLookupInput;
 
 typedef enum {
-  BODY_LOOKUP_DRAG_COEFFICIENT = 0,
-  BODY_LOOKUP_DRAG_FORCE = 1,
-} BodyLookupMetric;
-
-/* Clamp a scalar to [min_value, max_value]. */
-static float clampf(float x, float min_value, float max_value) {
-  if (x < min_value) {
-    return min_value;
-  }
-  if (x > max_value) {
-    return max_value;
-  }
-  return x;
+  static float clampf(float x, float min_value,
+                      float max_value){if (x < min_value){return min_value;}
+if (x > max_value) {
+  return max_value;
+}
+return x;
 }
 
 /* Linear interpolation between a and b using factor t in [0, 1]. */
@@ -101,8 +75,7 @@ static float interpolate_monotonic_axis(const float* axis, const float* values,
 }
 
 /* Select axis/metric arrays and run clamped 1D interpolation. */
-float body_lookup(float input_value, BodyLookupInput input_kind,
-                  BodyLookupMetric metric) {
+float body_lookup(float input_value, BodyLookupInput input_kind) {
   const float* axis = NULL;
   const float* values = NULL;
   const size_t count = BODY_DRAGCOEFF_ROW_COUNT;
@@ -113,75 +86,39 @@ float body_lookup(float input_value, BodyLookupInput input_kind,
     axis = BODY_VERTICAL_VELOCITY_MPS;
   }
 
-  if (metric == BODY_LOOKUP_DRAG_FORCE) {
-    values = BODY_DRAG_FORCE;
-  } else {
-    values = BODY_CD;
-  }
+  values = BODY_CD;
 
   return interpolate_monotonic_axis(axis, values, count, input_value);
 }
 
 /* Convenience wrapper: lookup using sea-level altitude as input axis. */
-float body_lookup_by_altitude(float altitude_sealevel_m,
-                              BodyLookupMetric metric) {
-  return body_lookup(altitude_sealevel_m, BODY_LOOKUP_BY_ALTITUDE_SEALEVEL,
-                     metric);
+float body_lookup_by_altitude(float altitude_sealevel_m) {
+  return body_lookup(altitude_sealevel_m, BODY_LOOKUP_BY_ALTITUDE_SEALEVEL);
 }
 
 /* Convenience wrapper: lookup using vertical velocity as input axis. */
-float body_lookup_by_vertical_velocity(float vertical_velocity_mps,
-                                       BodyLookupMetric metric) {
-  return body_lookup(vertical_velocity_mps, BODY_LOOKUP_BY_VERTICAL_VELOCITY,
-                     metric);
-}
-
-/* Lookup drag coefficient from sea-level altitude input. */
-float body_drag_coefficient_from_altitude(float altitude_sealevel_m) {
-  return body_lookup_by_altitude(altitude_sealevel_m,
-                                 BODY_LOOKUP_DRAG_COEFFICIENT);
-}
-
-/* Lookup drag force from sea-level altitude input. */
-float body_drag_force_from_altitude(float altitude_sealevel_m) {
-  return body_lookup_by_altitude(altitude_sealevel_m, BODY_LOOKUP_DRAG_FORCE);
-}
-
-/* Lookup drag coefficient from vertical velocity input. */
-float body_drag_coefficient_from_velocity(float vertical_velocity_mps) {
-  return body_lookup_by_vertical_velocity(vertical_velocity_mps,
-                                          BODY_LOOKUP_DRAG_COEFFICIENT);
-}
-
-/* Lookup drag force from vertical velocity input. */
-float body_drag_force_from_velocity(float vertical_velocity_mps) {
-  return body_lookup_by_vertical_velocity(vertical_velocity_mps,
-                                          BODY_LOOKUP_DRAG_FORCE);
+float body_lookup_by_vertical_velocity(float vertical_velocity_mps) {
+  return body_lookup(vertical_velocity_mps, BODY_LOOKUP_BY_VERTICAL_VELOCITY);
 }
 
 typedef struct {
   float input_value;
   BodyLookupInput input_kind;
-  BodyLookupMetric metric;
   const char* label;
 } BodyLookupTestCase;
 
 int main(void) {
   const BodyLookupTestCase tests[] = {
-      {331.148f, BODY_LOOKUP_BY_ALTITUDE_SEALEVEL, BODY_LOOKUP_DRAG_FORCE,
-       "1) 331.148, altitude, drag force"},
-      {331.148f, BODY_LOOKUP_BY_ALTITUDE_SEALEVEL, BODY_LOOKUP_DRAG_COEFFICIENT,
-       "2) 331.148, altitude, drag coefficient"},
-      {55.6f, BODY_LOOKUP_BY_VERTICAL_VELOCITY, BODY_LOOKUP_DRAG_FORCE,
-       "3) 55.6, speed, drag force"},
-      {55.6f, BODY_LOOKUP_BY_VERTICAL_VELOCITY, BODY_LOOKUP_DRAG_COEFFICIENT,
-       "4) 55.6, speed, drag coefficient"},
+      {331.148f, BODY_LOOKUP_BY_ALTITUDE_SEALEVEL,
+       "1) 331.148, altitude, drag coefficient"},
+      {55.6f, BODY_LOOKUP_BY_VERTICAL_VELOCITY,
+       "2) 55.6, speed, drag coefficient"},
   };
 
   const size_t count = sizeof(tests) / sizeof(tests[0]);
   for (size_t i = 0; i < count; ++i) {
     const BodyLookupTestCase* tc = &tests[i];
-    float result = body_lookup(tc->input_value, tc->input_kind, tc->metric);
+    float result = body_lookup(tc->input_value, tc->input_kind);
     printf("%s\n", tc->label);
     printf("   result = %.9f\n", result);
   }

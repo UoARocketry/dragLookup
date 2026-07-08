@@ -93,11 +93,7 @@ def read_body_lookup_csv(file_path: str | Path) -> BodyLookupSeries:
 
 
 def _metric_header_name(metric_name: str) -> str:
-	if metric_name == "dragCoeff":
-		return "body_dragCoefficient_lookup.h"
-	if metric_name == "dragForce":
-		return "body_dragForce_lookup.h"
-	return f"body_{metric_name}_lookup.h"
+	return "body_dragCoefficient_lookup.h"
 
 
 def _render_header(series: BodyLookupSeries) -> str:
@@ -105,11 +101,8 @@ def _render_header(series: BodyLookupSeries) -> str:
 	guard = f"BODY_{upper_metric}_LOOKUP_H"
 	row_count = len(series.values)
 
-	value_name = "BODY_CD" if series.metric == "dragCoeff" else "BODY_DRAG_FORCE"
-	table_name = (
-		"BODY_DRAGCOEFF_TABLE" if series.metric == "dragCoeff" else "BODY_DRAGFORCE_TABLE"
-	)
-
+	value_name = "BODY_CD"
+	table_name = "BODY_DRAGCOEFF_TABLE"
 	sealevel_text = _join_c_floats(series.altitude_sealevel_m)
 	agl_text = _join_c_floats(series.altitude_agl_m)
 	speed_text = _join_c_floats(series.vertical_velocity_m_s)
@@ -194,5 +187,7 @@ if __name__ == "__main__":
 	output_dir = base_dir / args.headers_dir
 	for file_path in files:
 		series = read_body_lookup_csv(file_path)
+		if series.metric != "dragCoeff":
+			continue
 		header_path = write_body_header(series, output_dir)
 		print(f"generated: {header_path}")

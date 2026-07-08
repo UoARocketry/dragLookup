@@ -153,17 +153,12 @@ def _join_c_floats(values: list[float], indent: str = "    ", per_line: int = 8)
 
 
 def _metric_header_name(metric_name: str) -> str:
-	if metric_name == "dragCoeff":
-		return "airbrake_dragCoefficient_lookup.h"
-	if metric_name == "dragForce":
-		return "airbrake_dragForce_lookup.h"
-	return f"airbrake_{metric_name}_lookup.h"
+	return "airbrake_dragCoefficient_lookup.h"
 
 
 def _render_header(metric_name: str, tables: list[DragLookupTable]) -> str:
 	if not tables:
 		raise ValueError(f"No tables available for metric '{metric_name}'.")
-
 	sorted_tables = sorted(tables, key=lambda t: t.air_density_kg_m3, reverse=True)
 	deployment_count = len(sorted_tables[0].deployment_axis)
 
@@ -176,9 +171,8 @@ def _render_header(metric_name: str, tables: list[DragLookupTable]) -> str:
 	upper_metric = metric_name.upper()
 	guard = f"AIRBRAKE_{upper_metric}_LOOKUP_H"
 	struct_name = "AirbrakeTable"
-	value_pointer_name = "cd_values" if metric_name == "dragCoeff" else "values"
-	lookup_name = "AIRBRAKE_DRAGCOEFF_TABLE" if metric_name == "dragCoeff" else "AIRBRAKE_DRAGFORCE_TABLE"
-
+	value_pointer_name = "cd_values"
+	lookup_name = "AIRBRAKE_DRAGCOEFF_TABLE"
 	lines: list[str] = []
 	lines.append(f"#ifndef {guard}")
 	lines.append(f"#define {guard}")
@@ -244,6 +238,9 @@ def write_metric_headers(
 	created: list[Path] = []
 
 	for metric_name, tables in tables_by_metric.items():
+		if metric_name != "dragCoeff":
+			continue
+
 		header_name = _metric_header_name(metric_name)
 		header_path = output_dir / header_name
 		header_text = _render_header(metric_name, tables)
@@ -363,7 +360,7 @@ def _parse_args() -> argparse.Namespace:
 	parser.add_argument(
 		"--metric",
 		default="all",
-		help="Metric to plot: dragCoeff, dragForce, or all.",
+		help="Metric to plot: dragCoeff or all.",
 	)
 	parser.add_argument(
 		"--plot",
@@ -405,5 +402,5 @@ if __name__ == "__main__":
 		for metric_name, metric_tables in tables_by_metric.items():
 			show_metric_overview(metric_name, metric_tables, args.plot)
 	else:
-		show_metric_overview(args.metric, tables_by_metric.get(args.metric, []), args.plot)
-
+		if args.metric == "dragCoeff":
+			show_metric_overview(args.metric, tables_by_metric.get(args.metric, []), args.plot)

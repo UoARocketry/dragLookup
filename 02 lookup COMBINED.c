@@ -1,29 +1,28 @@
 /*
- * AIRBRAKE lookup module
+ * COMBINED AIRBRAKE and BODY lookup module
  *
  * Usage:
  * - Include this C file in a test build, or move function declarations into a
- *   header and compile this as a library unit. The main API is
- * `airbrake_lookup`.
- * - Main API:
- *     float airbrake_lookup(float altitude_m, float speed, float
- * deployment_percent); airbrake_lookup_drag_coefficient(...)
+ *   header and compile this as a library unit.
+ * - Main APIs:
+ *     float airbrake_lookup(float altitude_m, float speed,
+ *                           float deployment_percent);
+ *     float body_lookup(float input_value, BodyLookupInput input_kind);
  *
  * Behavior:
- * - altitude_m selects one density block via fixed altitude bands.
- * - speed is clamped to the selected block's speed axis bounds.
- * - deployment accepts either 0..1 or 0..100 input.
- * - deployment outside [0, 1] after normalization returns -1.0f.
- * - altitude outside [290, 515] m returns -1.0f.
- * - Inside a selected block, bilinear interpolation is applied over
- *   speed and deployment.
+ * - See individual function blocks for detailed behavior.
  */
 
 #include <stddef.h>
 #include <stdio.h>
 
-#define cd_values values
+// Include both generated lookup table headers.
 #include "generated/airbrake_dragCoefficient_lookup.h"
+#include "generated/body_dragCoefficient_lookup.h"
+
+/*******************************************************************************
+ * Common Helper Functions
+ ******************************************************************************/
 
 /* Clamp a scalar to [min_value, max_value]. */
 static float clampf(float x, float min_value, float max_value) {
@@ -39,13 +38,16 @@ static float clampf(float x, float min_value, float max_value) {
 /* Linear interpolation between a and b using factor t in [0, 1]. */
 static float lerpf(float a, float b, float t) { return a + (b - a) * t; }
 
+/*******************************************************************************
+ * AIRBRAKE Lookup
+ ******************************************************************************/
+
 /* Accept deployment as either 0..1 or 0..100 and normalize to 0..1. */
-static float normalize_deployment(float deployment_percent) {
+static float airbrake_normalize_deployment(float deployment_percent) {
   float deployment = deployment_percent;
   if (deployment > 1.0f) {
     deployment *= 0.01f;
   }
-
   return deployment;
 }
 
@@ -84,14 +86,7 @@ static int altitude_to_block_index(float altitude_m, int* block_index) {
 /* Find the axis interval containing x and return interpolation factor t. */
 static void find_bracket_ascending(const float* axis, int count, float x,
                                    int* i0, int* i1, float* t) {
-  if (count <= 1) {
-    *i0 = 0;
-    *i1 = 0;
-    *t = 0.0f;
-    return;
-  }
-
-  if (x <= axis[0]) {
+  if (count <= 1 || x <= axis[0]) {
     *i0 = 0;
     *i1 = 0;
     *t = 0.0f;
@@ -127,7 +122,7 @@ static void find_deployment_bracket(float deployment_percent,
   const float deployment_min = 0.1f;
   const float deployment_max = 1.0f;
 
-  float deployment = normalize_deployment(deployment_percent);
+  float deployment = airbrake_normalize_deployment(deployment_percent);
   deployment = clampf(deployment, deployment_min, deployment_max);
 
   if (deployment_count <= 1) {
@@ -142,9 +137,6 @@ static void find_deployment_bracket(float deployment_percent,
   float position = (deployment - deployment_min) / step;
   int lower = (int)position;
 
-  if (lower < 0) {
-    lower = 0;
-  }
   if (lower >= deployment_count - 1) {
     *j0 = deployment_count - 1;
     *j1 = deployment_count - 1;
@@ -185,9 +177,10 @@ static float sample_drag_coeff_block(const AirbrakeTable* block, float speed,
   return lerpf(low_speed, high_speed, ts);
 }
 
-/* Main lookup API. */
+/* Main AIRBRAKE lookup API. */
 float airbrake_lookup(float altitude_m, float speed, float deployment_percent) {
-  const float normalized_deployment = normalize_deployment(deployment_percent);
+  const float normalized_deployment =
+      airbrake_normalize_deployment(deployment_percent);
   if (normalized_deployment < 0.0f || normalized_deployment > 1.0f) {
     return -1.0f;
   }
@@ -203,11 +196,59 @@ float airbrake_lookup(float altitude_m, float speed, float deployment_percent) {
   return sample_drag_coeff_block(&AIRBRAKE_DRAGCOEFF_TABLE[block_index], speed,
                                  deployment_percent);
 }
-/* Convenience wrapper for coefficient lookup. */
-float airbrake_lookup_drag_coefficient(float altitude_m, float speed,
-                                       float deployment_percent) {
-  return airbrake_lookup(altitude_m, speed, deployment_percent);
+
+/*******************************************************************************
+ * BODY Lookup
+ ******************************************************************************/
+
+typedef enum {
+  BODY_LOOKUP_BY_ALTITUDE_SEALEVEL = 0,
+  BODY_LOOKUP_BY_VERTICAL_VELOCITY = 1,
+} BodyLookupInput;
+
+/* Interpolate over monotonic axis data (ascending or descending). */
+static float interpolate_monotonic_axis(const float* axis, const float* values,
+                                        size_t count, float x) {
+  if (count == 0) return -1.0f;
+  if (count == 1) return values[0];
+
+  const float first = axis[0];
+  const float last = axis[count - 1];
+  const int ascending = last >= first;
+
+  float clamped_x = ascending ? clampf(x, first, last) : clampf(x, last, first);
+
+  for (size_t i = 0; i < count - 1; ++i) {
+    const float a0 = axis[i];
+    const float a1 = axis[i + 1];
+    const int in_segment = ascending ? (clamped_x >= a0 && clamped_x <= a1)
+                                     : (clamped_x <= a0 && clamped_x >= a1);
+    if (in_segment) {
+      const float span = a1 - a0;
+      const float t = (span == 0.0f) ? 0.0f : (clamped_x - a0) / span;
+      return lerpf(values[i], values[i + 1], t);
+    }
+  }
+  return values[count - 1];
 }
+
+/* Main BODY lookup API. */
+float body_lookup(float input_value, BodyLookupInput input_kind) {
+  const float* axis = NULL;
+  const size_t count = BODY_DRAGCOEFF_ROW_COUNT;
+
+  if (input_kind == BODY_LOOKUP_BY_ALTITUDE_SEALEVEL) {
+    axis = BODY_ALTITUDE_SEALEVEL_M;
+  } else {
+    axis = BODY_VERTICAL_VELOCITY_MPS;
+  }
+
+  return interpolate_monotonic_axis(axis, BODY_CD, count, input_value);
+}
+
+/*******************************************************************************
+ * Main Test Harness
+ ******************************************************************************/
 
 typedef struct {
   float altitude_m;
@@ -216,24 +257,43 @@ typedef struct {
   const char* label;
 } AirbrakeLookupTestCase;
 
-/* Local smoke-test harness for quick verification in standalone builds. */
-int main(void) {
-  const AirbrakeLookupTestCase tests[] = {
-      {400.0f, 43.0f, 30.0f, "1) NORMAL: alt=400m, 43, 30%, drag coefficient"},
-      {500.0f, 0.0f, 50.0f, "3) NORMAL: alt=500m, 0, 50%, drag coefficient"},
-      {450.0f, 42.0f, 80.0f, "5) NORMAL: alt=450m, 42, 80%, drag coefficient"},
-      {400.0f, 30.0f, 40.0f,
-       "7) BOUND CHECK: alt=400m, 30, 40%, drag coefficient"},
-      {500.0f, 50.0f, -10.0f,
-       "9) BOUND CHECK: alt=500m, 50, -10%, drag coefficient"},
-      {520.0f, 50.0f, 50.0f, "10) BOUND CHECK: alt=520m out-of-range -> error"},
-  };
+typedef struct {
+  float input_value;
+  BodyLookupInput input_kind;
+  const char* label;
+} BodyLookupTestCase;
 
-  const size_t count = sizeof(tests) / sizeof(tests[0]);
-  for (size_t i = 0; i < count; ++i) {
-    const AirbrakeLookupTestCase* tc = &tests[i];
+int main(void) {
+  printf("--- Running AIRBRAKE tests ---\n");
+  const AirbrakeLookupTestCase airbrake_tests[] = {
+      {400.0f, 43.0f, 30.0f, "1) NORMAL: alt=400m, 43, 30%"},
+      {500.0f, 0.0f, 50.0f, "2) NORMAL: alt=500m, 0, 50%"},
+      {450.0f, 42.0f, 80.0f, "3) NORMAL: alt=450m, 42, 80%"},
+      {400.0f, 30.0f, 40.0f, "4) BOUND CHECK: alt=400m, 30, 40%"},
+      {500.0f, 50.0f, -10.0f, "5) BOUND CHECK: alt=500m, 50, -10%"},
+      {520.0f, 50.0f, 50.0f, "6) BOUND CHECK: alt=520m out-of-range -> error"},
+  };
+  const size_t airbrake_count =
+      sizeof(airbrake_tests) / sizeof(airbrake_tests[0]);
+  for (size_t i = 0; i < airbrake_count; ++i) {
+    const AirbrakeLookupTestCase* tc = &airbrake_tests[i];
     float result =
         airbrake_lookup(tc->altitude_m, tc->speed, tc->deployment_percent);
+    printf("%s\n", tc->label);
+    printf("   result (drag coefficient) = %.9f\n", result);
+  }
+
+  printf("\n--- Running BODY tests ---\n");
+  const BodyLookupTestCase body_tests[] = {
+      {331.148f, BODY_LOOKUP_BY_ALTITUDE_SEALEVEL,
+       "1) 331.148, altitude, drag coefficient"},
+      {55.6f, BODY_LOOKUP_BY_VERTICAL_VELOCITY,
+       "2) 55.6, speed, drag coefficient"},
+  };
+  const size_t body_count = sizeof(body_tests) / sizeof(body_tests[0]);
+  for (size_t i = 0; i < body_count; ++i) {
+    const BodyLookupTestCase* tc = &body_tests[i];
+    float result = body_lookup(tc->input_value, tc->input_kind);
     printf("%s\n", tc->label);
     printf("   result (drag coefficient) = %.9f\n", result);
   }

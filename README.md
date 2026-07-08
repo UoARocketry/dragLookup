@@ -3,6 +3,7 @@
 Lookup table generation and runtime lookup code for AIRBRAKE and BODY drag data.
 
 Note: uses sea level altitude inputs. velocity has to be in the vertical axis.
+Removed support for drag force lookup generation and lookup.
 
 ## Project Files
 
@@ -31,13 +32,12 @@ python "01 generate header AIRBRAKE.py" --plot none --write-headers --headers-di
 
 Outputs:
 - `generated/airbrake_dragCoefficient_lookup.h`
-- `generated/airbrake_dragForce_lookup.h`
 
 Optional plotting:
 
 ```bash
 python "01 generate header AIRBRAKE.py" --plot heatmap
-python "01 generate header AIRBRAKE.py" --metric dragCoeff --plot lines
+python "01 generate header AIRBRAKE.py" --plot lines
 ```
 
 ### BODY headers
