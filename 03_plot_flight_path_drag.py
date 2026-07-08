@@ -223,20 +223,23 @@ def main():
 
     # --- Plot 1: Total Drag Coefficient vs. Timestep ---
     print("Generating Plot 1: Total Drag Coefficient vs. Timestep...")
-    plt.figure(figsize=(14, 8))
+    # fig1, ax1 = plt.subplots(figsize=(14, 8))
 
     # Plot baseline (body only)
-    plt.plot(timesteps, body_cds_baseline, label="Baseline (0% Deployment)", color="black", linestyle="--")
+    # plt.plot(timesteps, body_cds_baseline, label="Baseline (0% Deployment)", color="black", linestyle="--")
 
     # Plot for each deployment level
     deployment_levels = range(10, 101, 10)
     colors = plt.cm.viridis(np.linspace(0, 1, len(deployment_levels)))
 
+    # lines_for_hover = []
+    hover_data_store = {}
+
     for i, dep_level in enumerate(deployment_levels):
         total_cds = []
         valid_timesteps = []
         for t in timesteps:
-            altitude = body_altitudes[t]
+            altitude = body_altitudes[t] # noqa: F841
             velocity = body_velocities[t]
             body_cd = body_cds_baseline[t]
 
@@ -244,65 +247,188 @@ def main():
 
             if airbrake_cd != -1.0:
                 total_cd = (airbrake_cd * 3.0) + body_cd
-                total_cds.append(total_cd)
-                valid_timesteps.append(t)
+                total_cds.append(total_cd) # noqa: F841
+                valid_timesteps.append(t) # noqa: F841
 
-        plt.plot(valid_timesteps, total_cds, label=f"{dep_level}% Deployment", color=colors[i])
+                # Store data for hover annotation
+                hover_data_store[(t, dep_level)] = {
+                    "airbrake_cd": airbrake_cd,
+                    "body_cd": body_cd,
+                    "total_cd": total_cd,
+                }
 
-    plt.title("Total Drag Coefficient vs. Timestep for Different Airbrake Deployments")
-    plt.xlabel("Timestep")
-    plt.ylabel("Total Drag Coefficient (Cd)")
-    plt.grid(True, which="both", linestyle="--", linewidth=0.5)
-    plt.legend(title="Airbrake Deployment", bbox_to_anchor=(1.02, 1), loc="upper left")
-    plt.tight_layout(rect=[0, 0, 0.88, 1])
+        # line, = ax1.plot(valid_timesteps, total_cds, label=f"{dep_level}% Deployment", color=colors[i])
+        # lines_for_hover.append((line, dep_level))
+
+    # ax1.set_title("Total Drag Coefficient vs. Timestep for Different Airbrake Deployments")
+    # ax1.set_xlabel("Timestep")
+    # ax1.set_ylabel("Total Drag Coefficient (Cd)")
+    # ax1.grid(True, which="both", linestyle="--", linewidth=0.5)
+    # ax1.legend(title="Airbrake Deployment", bbox_to_anchor=(1.02, 1), loc="upper left")
+    # fig1.tight_layout(rect=[0, 0, 0.88, 1])
+
+    # # Add hover annotation logic for Plot 1
+    # annot = ax1.annotate("", xy=(0, 0), xytext=(20, 20), textcoords="offset points",
+    #                      bbox=dict(boxstyle="round", fc="w", alpha=0.8),
+    #                      arrowprops=dict(arrowstyle="->"))
+    # annot.set_visible(False)
+
+    # def update_annot(line, dep_level, ind):
+    #     x, y = line.get_data()
+    #     annot.xy = (x[ind["ind"][0]], y[ind["ind"][0]])
+    #
+    #     timestep = int(x[ind["ind"][0]])
+    #     data = hover_data_store.get((timestep, dep_level))
+    #
+    #     if data:
+    #         text = (f"Timestep: {timestep}\n"
+    #                 f"Deployment: {dep_level}%\n"
+    #                 f"Airbrake Cd: {data['airbrake_cd']:.4f}\n"
+    #                 f"Body Cd: {data['body_cd']:.4f}\n"
+    #                 f"Total Cd: {data['total_cd']:.4f}")
+    #         annot.set_text(text)
+    #         annot.get_bbox_patch().set_alpha(0.8)
+
+    # def hover(event):
+    #     vis = annot.get_visible()
+    #     if event.inaxes == ax1:
+    #         for line, dep_level in lines_for_hover:
+    #             cont, ind = line.contains(event)
+    #             if cont:
+    #                 update_annot(line, dep_level, ind)
+    #                 annot.set_visible(True)
+    #                 fig1.canvas.draw_idle()
+    #                 return
+    #     if vis:
+    #         annot.set_visible(False)
+    #         fig1.canvas.draw_idle()
+
+    # fig1.canvas.mpl_connect("motion_notify_event", hover)
+
+    # --- Plot 3: Total Drag Coefficient vs. Altitude ---
+    print("Generating Plot 3: Total Drag Coefficient vs. Altitude...")
+    fig3, ax3 = plt.subplots(figsize=(14, 8))
+
+    # Plot baseline (body only)
+    ax3.plot(body_altitudes, body_cds_baseline, label="Baseline (0% Deployment)", color="black", linestyle="--")
+
+    lines_for_hover_p3 = []
+    hover_data_store_p3 = {}
+    # Re-use the data calculated for Plot 1
+    for i, dep_level in enumerate(deployment_levels):
+        line_data = [
+            (body_altitudes[t[0]], data['total_cd'], t[0])
+            for t, data in hover_data_store.items() if data and t[1] == dep_level
+        ]
+
+        # Sort by altitude to ensure the line is drawn correctly
+        line_data.sort()
+        if line_data:
+            valid_altitudes, total_cds, sorted_timesteps = zip(*line_data)
+            line, = ax3.plot(valid_altitudes, total_cds, label=f"{dep_level}% Deployment", color=colors[i])
+            lines_for_hover_p3.append((line, dep_level))
+            # Store sorted timesteps for this line to reverse lookup for hover
+            hover_data_store_p3[dep_level] = sorted_timesteps
+
+    ax3.set_title("Total Drag Coefficient vs. Altitude for Different Airbrake Deployments")
+    ax3.set_xlabel("Altitude (Sea Level, m)")
+    ax3.set_ylabel("Total Drag Coefficient (Cd)")
+    ax3.grid(True, which="both", linestyle="--", linewidth=0.5)
+    ax3.legend(title="Airbrake Deployment", bbox_to_anchor=(1.02, 1), loc="upper left")
+    fig3.tight_layout(rect=[0, 0, 0.88, 1])
+
+    # Add hover annotation logic for Plot 3
+    annot_p3 = ax3.annotate("", xy=(0, 0), xytext=(20, 20), textcoords="offset points",
+                           bbox=dict(boxstyle="round", fc="w", alpha=0.8),
+                           arrowprops=dict(arrowstyle="->"))
+    annot_p3.set_visible(False)
+
+    def update_annot_p3(line, dep_level, ind):
+        x, y = line.get_data()
+        point_index = ind["ind"][0]
+        annot_p3.xy = (x[point_index], y[point_index])
+
+        # Get the original timestep from the sorted list
+        sorted_timesteps = hover_data_store_p3.get(dep_level)
+        if not sorted_timesteps or point_index >= len(sorted_timesteps):
+            return
+
+        timestep = sorted_timesteps[point_index]
+        data = hover_data_store.get((timestep, dep_level))
+
+        if data:
+            text = (f"Altitude: {x[point_index]:.2f}m\n"
+                    f"Timestep: {timestep}\n"
+                    f"Deployment: {dep_level}%\n"
+                    f"Airbrake Cd: {data['airbrake_cd']:.4f}\n"
+                    f"Body Cd: {data['body_cd']:.4f}\n"
+                    f"Total Cd: {data['total_cd']:.4f}")
+            annot_p3.set_text(text)
+            annot_p3.get_bbox_patch().set_alpha(0.8)
+
+    def hover_p3(event):
+        vis = annot_p3.get_visible()
+        if event.inaxes == ax3:
+            for line, dep_level in lines_for_hover_p3:
+                cont, ind = line.contains(event)
+                if cont:
+                    update_annot_p3(line, dep_level, ind)
+                    annot_p3.set_visible(True)
+                    fig3.canvas.draw_idle()
+                    return
+        if vis:
+            annot_p3.set_visible(False)
+            fig3.canvas.draw_idle()
+
+    fig3.canvas.mpl_connect("motion_notify_event", hover_p3)
 
     # --- Plot 2: Body Cd Lookup Method Comparison ---
     print("Generating Plot 2: Body Cd Lookup Method Comparison...")
-    plt.figure(figsize=(14, 8))
+    # plt.figure(figsize=(14, 8))
 
-    # Lookup by velocity
-    body_cds_from_vel = [
-        body_lookup(vel, body_velocities, body_cds_baseline) for vel in body_velocities
-    ]
+    # # Lookup by velocity
+    # body_cds_from_vel = [
+    #     body_lookup(vel, body_velocities, body_cds_baseline) for vel in body_velocities
+    # ]
 
-    # Lookup by altitude
-    body_cds_from_alt = [
-        body_lookup(alt, body_altitudes, body_cds_baseline) for alt in body_altitudes
-    ]
+    # # Lookup by altitude
+    # body_cds_from_alt = [
+    #     body_lookup(alt, body_altitudes, body_cds_baseline) for alt in body_altitudes
+    # ]
 
-    plt.plot(
-        timesteps,
-        body_cds_from_vel,
-        label="Body Cd from Velocity Lookup",
-        color="blue",
-        marker=".",
-        linestyle="-"
-    )
-    plt.plot(
-        timesteps,
-        body_cds_from_alt,
-        label="Body Cd from Altitude Lookup",
-        color="red",
-        marker="x",
-        linestyle=":"
-    )
+    # plt.plot(
+    #     timesteps,
+    #     body_cds_from_vel,
+    #     label="Body Cd from Velocity Lookup",
+    #     color="blue",
+    #     marker=".",
+    #     linestyle="-"
+    # )
+    # plt.plot(
+    #     timesteps,
+    #     body_cds_from_alt,
+    #     label="Body Cd from Altitude Lookup",
+    #     color="red",
+    #     marker="x",
+    #     linestyle=":"
+    # )
 
-    # For reference, plot the original data
-    plt.plot(
-        timesteps,
-        body_cds_baseline,
-        label="Original Body Cd Data",
-        color="green",
-        linestyle="--",
-        alpha=0.7
-    )
+    # # For reference, plot the original data
+    # plt.plot(
+    #     timesteps,
+    #     body_cds_baseline,
+    #     label="Original Body Cd Data",
+    #     color="green",
+    #     linestyle="--",
+    #     alpha=0.7
+    # )
 
-    plt.title("Comparison of Body Cd Lookup Methods")
-    plt.xlabel("Timestep")
-    plt.ylabel("Body Drag Coefficient (Cd)")
-    plt.grid(True, which="both", linestyle="--", linewidth=0.5)
-    plt.legend()
-    plt.tight_layout()
+    # plt.title("Comparison of Body Cd Lookup Methods")
+    # plt.xlabel("Timestep")
+    # plt.ylabel("Body Drag Coefficient (Cd)")
+    # plt.grid(True, which="both", linestyle="--", linewidth=0.5)
+    # plt.legend()
+    # plt.tight_layout()
 
     print("Displaying plots...")
     plt.show()
@@ -310,7 +436,7 @@ def main():
 
 if __name__ == "__main__":
     # Check for dependencies
-    try:
+    try: # noqa: F821
         import matplotlib
         import numpy
     except ImportError:

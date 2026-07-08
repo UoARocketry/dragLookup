@@ -119,3 +119,30 @@ Compile lookup COMBINED .c:
 ```bash
 gcc -std=c11 -Wall -Wextra -pedantic "02 lookup COMBINED.c" -o /tmp/airbrake_lookup
 ```
+
+## Plotting
+The 03 plotting script can be used to visualize the lookup tables and the interpolation behavior.
+Requires matplotlib and numpy, and up to date generated headers in the generated/ directory.
+
+```bash
+python "03_plot_flight_path_drag.py"
+```
+
+Plot 1, titled "Total Drag Coefficient vs. Timestep and Altitude," is designed to visualize how the rocket's total drag coefficient changes throughout its simulated flight path under various airbrake deployment scenarios.
+
+Here’s a breakdown of what it displays:
+
+Axes:
+- The primary x-axis represents the flight's progression over time, shown as discrete timesteps.
+- A secondary x-axis is included at the bottom to show the corresponding sea-level altitude in meters, providing a clear spatial context for the time-based data.
+- The y-axis shows the Total Drag Coefficient (Cd), which is the combined drag from both the rocket body and the deployed airbrakes.
+
+Data Series:
+- Baseline (0% Deployment): A distinct dashed black line shows the drag coefficient of the rocket body alone, without any airbrakes deployed. This serves as a reference to measure the impact of the airbrakes.
+- Deployment Levels: A series of colored lines shows the total drag coefficient for different fixed airbrake deployment levels, ranging from 10% to 100%. This allows for easy comparison of how much drag is added at each level of deployment.
+
+Calculation: Each point on the deployment-level lines is calculated by combining the drag from the body and the airbrakes using the formula: `Total Cd = (3 * Airbrake Cd) + Body Cd`.
+
+Interactive Tooltip: The plot is interactive. When you hover your mouse over any point on a line, a tooltip appears. This tooltip provides a detailed breakdown of the values at that specific point in the flight, showing the individual airbrake Cd, the body Cd, and the final combined Total Cd.
+
+In essence, Plot 1 provides a powerful visual analysis of the airbrakes' effectiveness, showing exactly how much additional drag can be generated at any point during the flight.
