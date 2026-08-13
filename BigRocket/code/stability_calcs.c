@@ -1,7 +1,30 @@
-
 #include <stdio.h>
+#include <math.h>
+
+#define MAX_ROWS 1200
+
+// One row of useful OpenRocket flight data
+typedef struct
+{
+    float time;
+    float altitude;
+    float velocity;
+    float angle_of_attack;
+    float cp;
+    float cg;
+    float drag_force;
+    float drag_coefficient;
+    float air_pressure;
+    float air_density;
+    float mach;
+
+} OpenRocketData;
 
 
+// Array to hold the OpenRocket simulation
+OpenRocketData flight_data[MAX_ROWS];
+
+int flight_data_count = 0;
 
 const float speeds[] = {
     0, 1, 2, 3, 4, 5, 7.5, 10,
@@ -29,6 +52,108 @@ const float cd_table[14][9] = {
     {0.0180577, 0.0383909, 0.0609662, 0.0855134, 0.106557, 0.124284, 0.138846, 0.152049, 0.165018},
     {0.0182746, 0.0382504, 0.061185, 0.0856915, 0.106712, 0.1244, 0.138951, 0.152138, 0.1651}
 };
+
+
+int load_openrocket_data(const char *filename)
+{
+    FILE *file = fopen(filename, "r");
+
+    if (file == NULL)
+    {
+        printf("ERROR: Could not open OpenRocket CSV\n");
+        return 0;
+    }
+
+    char line[500];
+
+    while (fgets(line, sizeof(line), file) != NULL)
+    {
+        // OpenRocket uses # for comments, events and headers.
+        // We don't want to try to interpret those as data.
+        if (line[0] == '#')
+            continue;
+
+        // Ignore blank lines
+        if (line[0] == '\n')
+            continue;
+
+        if (flight_data_count >= MAX_ROWS)
+        {
+            printf("ERROR: Too many OpenRocket rows\n");
+            fclose(file);
+            return 0;
+        }
+
+        OpenRocketData *row = &flight_data[flight_data_count];
+
+        int result = sscanf(
+            line,
+            "%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f",
+            &row->time,
+            &row->altitude,
+            &row->velocity,
+            &row->angle_of_attack,
+            &row->cp,
+            &row->cg,
+            &row->drag_force,
+            &row->drag_coefficient,
+            &row->air_pressure,
+            &row->air_density,
+            &row->mach
+        );
+
+        // Only add the row if all 11 values were successfully read
+        if (result == 11)
+        {
+            flight_data_count++;
+        }
+    }
+
+    fclose(file);
+
+    printf("Loaded %d OpenRocket data points\n", flight_data_count);
+
+    return 1;
+}
+
+
+OpenRocketData *openrocket_lookup(float velocity)
+{
+    if (flight_data_count == 0)
+    {
+        return NULL;
+    }
+
+    int best_index = -1;
+    float smallest_difference = 999999.0f;
+
+    for (int i = 0; i < flight_data_count; i++)
+    {
+        // Ignore rows where OpenRocket hasn't calculated a CP
+        // (these occur before launch / after apogee)
+        if (isnan(flight_data[i].cp))
+            continue;
+
+        float difference = fabsf(
+            flight_data[i].velocity - velocity
+        );
+
+        if (difference < smallest_difference)
+        {
+            smallest_difference = difference;
+            best_index = i;
+        }
+    }
+
+    if (best_index == -1)
+    {
+        return NULL;
+    }
+
+    return &flight_data[best_index];
+}
+
+
 
 float airbrake_cd_lookup(float velocity, float deployment)
 {
@@ -152,28 +277,67 @@ float airbrake_cd_lookup(float velocity, float deployment)
 }
 
 
-int main(void)
+const float area_deployments[] = {
+    10, 20, 30, 40, 50, 60, 70, 80, 90
+};
+
+const float airbrake_areas[] = {
+    0.000388,
+    0.000734,
+    0.001043,
+    0.001316,
+    0.001556,
+    0.001766,
+    0.001948,
+    0.002106,
+    0.002240
+};
+
+
+float airbrake_area_lookup(float deployment)
 {
-    float velocity = 50.0;
-    float deployment = 55.0;
+    // Keep deployment within the range of our area data
+    if (deployment < area_deployments[0])
+        deployment = area_deployments[0];
 
-    float cd = airbrake_cd_lookup(velocity, deployment);
+    if (deployment > area_deployments[8])
+        deployment = area_deployments[8];
 
-    printf("Velocity: %.2f m/s\n", velocity);
-    printf("Deployment: %.2f degrees\n", deployment);
-    printf("Airbrake Cd: %.6f\n", cd);
+    // Find the two deployment angles surrounding our input
+    int index = 0;
 
-    return 0;
+    for (int i = 0; i < 8; i++)
+    {
+        if (deployment >= area_deployments[i] &&
+            deployment <= area_deployments[i + 1])
+        {
+            index = i;
+            break;
+        }
+    }
+
+    // Get the two surrounding area values
+    float area1 = airbrake_areas[index];
+    float area2 = airbrake_areas[index + 1];
+
+    // Calculate how far between the two deployment angles we are
+    float fraction =
+        (deployment - area_deployments[index]) /
+        (area_deployments[index + 1] - area_deployments[index]);
+
+    // Linearly interpolate the area
+    return area1 + (area2 - area1) * fraction;
 }
 
 
 float airbrake_drag(float air_density, float velocity,
-                    float deployment, float airbrake_area)
+                    float deployment)
 {
-    // Get the airbrake Cd from the CFD lookup table
+    // Look up aerodynamic properties from the CFD-derived tables
     float airbrake_cd = airbrake_cd_lookup(velocity, deployment);
+    float airbrake_area = airbrake_area_lookup(deployment);
 
-    // Calculate aerodynamic drag force:
+    // Calculate airbrake drag force:
     // F = 0.5 * rho * V^2 * Cd * A
     float ab_drag = 0.5f * air_density
                   * velocity * velocity
@@ -181,4 +345,41 @@ float airbrake_drag(float air_density, float velocity,
                   * airbrake_area;
 
     return ab_drag;
+}
+
+
+
+int main(void)
+{
+    // Load the OpenRocket CSV
+    if (!load_openrocket_data("../csv_data/Comprocket data.csv"))
+    {
+        return 1;
+    }
+
+    // Test velocity
+    float velocity = 50.0f;
+
+    // Find the closest OpenRocket row
+    OpenRocketData *rocket = openrocket_lookup(velocity);
+
+    if (rocket == NULL)
+    {
+        printf("Could not find OpenRocket data\n");
+        return 1;
+    }
+
+    printf("\nOpenRocket lookup:\n");
+
+    printf("Time:           %.3f s\n", rocket->time);
+    printf("Altitude:       %.3f m\n", rocket->altitude);
+    printf("Velocity:       %.3f m/s\n", rocket->velocity);
+    printf("CP:             %.3f cm\n", rocket->cp);
+    printf("CG:             %.3f cm\n", rocket->cg);
+    printf("Drag force:     %.3f N\n", rocket->drag_force);
+    printf("Drag coefficient: %.4f\n", rocket->drag_coefficient);
+    printf("Air density:    %.6f\n", rocket->air_density);
+    printf("Mach:           %.3f\n", rocket->mach);
+
+    return 0;
 }
