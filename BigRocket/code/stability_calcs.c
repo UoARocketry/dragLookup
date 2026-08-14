@@ -20,6 +20,8 @@ typedef struct
 
 } OpenRocketData;
 
+const float airbrake_position = 112.0f;
+const float rocket_diameter = 14.4f;    
 
 // Array to hold the OpenRocket simulation
 OpenRocketData flight_data[MAX_ROWS];
@@ -347,39 +349,98 @@ float airbrake_drag(float air_density, float velocity,
     return ab_drag;
 }
 
+float calculate_stability(
+    OpenRocketData *rocket,
+    float deployment)
+{
+    // Get the air density from OpenRocket.
+    // OpenRocket stores density as g/cm^3, so convert to kg/m^3.
+    float air_density = rocket->air_density * 1000.0f;
 
+    // Look up the airbrake properties for this flight condition.
+    float cd = airbrake_cd_lookup(rocket->velocity, deployment);
+    float area = airbrake_area_lookup(deployment);
+
+    // Calculate airbrake drag.
+    float airbrake_dragforce = airbrake_drag(
+        air_density,
+        rocket->velocity,
+        deployment
+    );
+
+    // Calculate the new CP using the force-weighted model.
+    float new_cp =
+        (rocket->drag_force * rocket->cp +
+         airbrake_dragforce * airbrake_position)
+        / (rocket->drag_force + airbrake_dragforce);
+
+    // Calculate stability margin in calibres.
+    float stability =
+        (new_cp - rocket->cg) / rocket_diameter;
+
+    return stability;
+}
 
 int main(void)
 {
-    // Load the OpenRocket CSV
     if (!load_openrocket_data("../csv_data/Comprocket data.csv"))
     {
         return 1;
     }
 
-    // Test velocity
-    float velocity = 50.0f;
+    float deployment = 55.0f;
 
-    // Find the closest OpenRocket row
-    OpenRocketData *rocket = openrocket_lookup(velocity);
+    printf("\n========================================\n");
+    printf("   STABILITY THROUGH ASCENT\n");
+    printf("========================================\n");
 
-    if (rocket == NULL)
+    printf("Deployment: %.1f degrees\n\n", deployment);
+
+    printf("Time (s)    Altitude (m)    Velocity (m/s)    Stability\n");
+    printf("---------------------------------------------------------\n");
+
+    for (int i = 0; i < flight_data_count; i++)
     {
-        printf("Could not find OpenRocket data\n");
-        return 1;
+        OpenRocketData *rocket = &flight_data[i];
+
+        // Ignore the very low-speed part of the flight.
+        if (rocket->velocity < 10.0f)
+        {
+            continue;
+        }
+
+        // OpenRocket density is in g/cm^3.
+        // Convert to kg/m^3.
+        float air_density =
+            rocket->air_density * 1000.0f;
+
+        // Calculate airbrake drag using the CFD lookup table.
+        float airbrake_dragforce =
+            airbrake_drag(
+                air_density,
+                rocket->velocity,
+                deployment
+            );
+
+        // Force-weighted CP approximation.
+        float new_cp =
+            (rocket->drag_force * rocket->cp +
+             airbrake_dragforce * airbrake_position)
+            /
+            (rocket->drag_force + airbrake_dragforce);
+
+        // Stability margin in calibres.
+        float stability =
+            (new_cp - rocket->cg) / rocket_diameter;
+
+        printf(
+            "%8.3f    %12.2f    %14.2f    %9.3f\n",
+            rocket->time,
+            rocket->altitude,
+            rocket->velocity,
+            stability
+        );
     }
-
-    printf("\nOpenRocket lookup:\n");
-
-    printf("Time:           %.3f s\n", rocket->time);
-    printf("Altitude:       %.3f m\n", rocket->altitude);
-    printf("Velocity:       %.3f m/s\n", rocket->velocity);
-    printf("CP:             %.3f cm\n", rocket->cp);
-    printf("CG:             %.3f cm\n", rocket->cg);
-    printf("Drag force:     %.3f N\n", rocket->drag_force);
-    printf("Drag coefficient: %.4f\n", rocket->drag_coefficient);
-    printf("Air density:    %.6f\n", rocket->air_density);
-    printf("Mach:           %.3f\n", rocket->mach);
 
     return 0;
 }
