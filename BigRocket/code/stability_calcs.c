@@ -378,68 +378,107 @@ float calculate_stability(
     float stability =
         (new_cp - rocket->cg) / rocket_diameter;
 
+    printf("DEBUG:\n");
+    printf("  Rocket drag:      %.3f N\n", rocket->drag_force);
+    printf("  Rocket CP:        %.3f cm\n", rocket->cp);
+    printf("  Airbrake drag:    %.3f N\n", airbrake_dragforce);
+    printf("  Airbrake CP:      %.3f cm\n", airbrake_position);
+    printf("  Combined CP:      %.3f cm\n", new_cp);
+    printf("  Stability:        %.3f calibres\n", stability);
+
     return stability;
+}
+
+int stability_check(OpenRocketData *rocket, float deployment)
+{
+    // Minimum acceptable stability in calibres
+    const float stability_threshold = 1.5f;
+
+    // Calculate the current stability
+    float stability = calculate_stability(rocket, deployment);
+
+    // Return 1 (true) if stable enough
+    if (stability >= stability_threshold)
+    {
+        return 1;
+    }
+
+    // Return 0 (false) if below the threshold
+    return 0;
 }
 
 int main(void)
 {
+    // Load OpenRocket simulation data
     if (!load_openrocket_data("../csv_data/Comprocket data.csv"))
     {
         return 1;
     }
 
-    float deployment = 55.0f;
+    // ---------------------------------------------------------
+    // Test inputs
+    // ---------------------------------------------------------
+
+    // Choose the deployment angle we want to test.
+    // Eventually this will come from the flight computer.
+    float deployment = 90.0f;
+
+    // Choose the current velocity.
+    // Eventually this will also come from the flight computer.
+    float target_velocity = 300.0f;
+
+    // Find the OpenRocket flight condition closest
+    // to our current velocity.
+    OpenRocketData *rocket = openrocket_lookup(target_velocity);
+
+    if (rocket == NULL)
+    {
+        printf("Could not find suitable OpenRocket data\n");
+        return 1;
+    }
+
+    // ---------------------------------------------------------
+    // Calculate stability
+    // ---------------------------------------------------------
+
+    float stability = calculate_stability(
+        rocket,
+        deployment
+    );
+    int stable = stability_check(rocket, deployment);
+
+    // ---------------------------------------------------------
+    // Display results
+    // ---------------------------------------------------------
 
     printf("\n========================================\n");
-    printf("   STABILITY THROUGH ASCENT\n");
+    printf("       STABILITY CALCULATION\n");
     printf("========================================\n");
 
-    printf("Deployment: %.1f degrees\n\n", deployment);
+    printf("Flight condition:\n");
+    printf("  Time:           %.3f s\n", rocket->time);
+    printf("  Altitude:       %.2f m\n", rocket->altitude);
+    printf("  Velocity:       %.2f m/s\n", rocket->velocity);
+    printf("  Air density:    %.4f kg/m^3\n",
+           rocket->air_density * 1000.0f);
 
-    printf("Time (s)    Altitude (m)    Velocity (m/s)    Stability\n");
-    printf("---------------------------------------------------------\n");
+    printf("\nAirbrakes:\n");
+    printf("  Deployment:     %.2f degrees\n", deployment);
 
-    for (int i = 0; i < flight_data_count; i++)
+    printf("\nStability:\n");
+    printf("  CP:              %.3f cm\n", rocket->cp);
+    printf("  CG:              %.3f cm\n", rocket->cg);
+    printf("  Stability:       %.3f calibres\n", stability);
+
+    printf("  Stability:       %.3f calibres\n", stability);
+
+    if (stable)
     {
-        OpenRocketData *rocket = &flight_data[i];
-
-        // Ignore the very low-speed part of the flight.
-        if (rocket->velocity < 10.0f)
-        {
-            continue;
-        }
-
-        // OpenRocket density is in g/cm^3.
-        // Convert to kg/m^3.
-        float air_density =
-            rocket->air_density * 1000.0f;
-
-        // Calculate airbrake drag using the CFD lookup table.
-        float airbrake_dragforce =
-            airbrake_drag(
-                air_density,
-                rocket->velocity,
-                deployment
-            );
-
-        // Force-weighted CP approximation.
-        float new_cp =
-            (rocket->drag_force * rocket->cp +
-             airbrake_dragforce * airbrake_position)
-            /
-            (rocket->drag_force + airbrake_dragforce);
-
-        // Stability margin in calibres.
-        float stability =
-            (new_cp - rocket->cg) / rocket_diameter;
-
-        printf(
-            "%8.3f    %12.2f    %14.2f    %9.3f\n",
-            rocket->time,
-            rocket->altitude,
-            rocket->velocity,
-            stability
-        );
+        printf("  Status:          STABLE\n");
+    }
+    else
+    {
+        printf("  Status:          UNSTABLE\n");
     }
 
     return 0;
