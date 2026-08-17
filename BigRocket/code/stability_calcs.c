@@ -1,5 +1,9 @@
 #include <stdio.h>
 #include <math.h>
+#include <string.h>
+#include <stdlib.h>
+
+
 
 #define MAX_ROWS 1200
 
@@ -21,7 +25,9 @@ typedef struct
 } OpenRocketData;
 
 const float airbrake_position = 112.0f;
-const float rocket_diameter = 14.4f;    
+const float rocket_diameter = 14.4f;
+const float air_density_constant = 0.9428f;     // kg/m^3, from CFD
+const float rocket_reference_area = 0.016259f;  // rocket cross-sectional area, m^2
 
 // Array to hold the OpenRocket simulation
 OpenRocketData flight_data[MAX_ROWS];
@@ -332,32 +338,25 @@ float airbrake_area_lookup(float deployment)
 }
 
 
-float airbrake_drag(float air_density, float velocity,
-                    float deployment)
+float airbrake_drag(float velocity, float deployment)
 {
-    // Look up aerodynamic properties from the CFD-derived tables
     float airbrake_cd = airbrake_cd_lookup(velocity, deployment);
-    float airbrake_area = airbrake_area_lookup(deployment);
 
-    // Calculate airbrake drag force:
-    // F = 0.5 * rho * V^2 * Cd * A
-    float ab_drag = 0.5f * air_density
-                  * velocity * velocity
-                  * airbrake_cd
-                  * airbrake_area;
+    float single_airbrake_drag = 0.5f * air_density_constant
+                                * velocity * velocity
+                                * airbrake_cd
+                                * rocket_reference_area;
 
-    return ab_drag;
+    // Three airbrakes total
+    return single_airbrake_drag * 3.0f;
 }
 
 float calculate_stability(
     OpenRocketData *rocket,
     float deployment,
-    float *out_new_cp)   // NEW: optional, lets caller see the shifted CP
+    float *out_new_cp)
 {
-    float air_density = rocket->air_density * 1000.0f;
-
     float airbrake_dragforce = airbrake_drag(
-        air_density,
         rocket->velocity,
         deployment
     );
@@ -392,28 +391,19 @@ int stability_check(OpenRocketData *rocket, float deployment)
 int get_stability_decision(
     float velocity,
     float deployment,
-    float *out_stability_margin   
+    float *out_stability_margin
 )
 {
     OpenRocketData *rocket = openrocket_lookup(velocity);
 
     if (rocket == NULL)
     {
-        // No sim data loaded at all — fail safe
         if (out_stability_margin != NULL)
             *out_stability_margin = 0.0f;
         return 0;
     }
 
-    float air_density = rocket->air_density * 1000.0f;
-
-    float airbrake_dragforce = airbrake_drag(air_density, velocity, deployment);
-
-    float new_cp = (rocket->drag_force * rocket->cp +
-                     airbrake_dragforce * airbrake_position)
-                  / (rocket->drag_force + airbrake_dragforce);
-
-    float stability = (new_cp - rocket->cg) / rocket_diameter;
+    float stability = calculate_stability(rocket, deployment, NULL);
 
     if (out_stability_margin != NULL)
         *out_stability_margin = stability;
@@ -428,50 +418,45 @@ int main(void)
         return 1;
     }
 
-    // Test velocities and deployment values to sweep
-    float test_velocities[] = { 50, 100, 150, 200, 250, 300, 350 };
-    float test_deployments[] = { 10, 30, 50, 70, 90 };
+    char input[64];
+    float velocity;
+    float deployment;
 
-    int num_velocities = sizeof(test_velocities) / sizeof(test_velocities[0]);
-    int num_deployments = sizeof(test_deployments) / sizeof(test_deployments[0]);
+    printf("Type EXIT at any prompt to quit.\n\n");
 
-    printf("========================================================\n");
-    printf(" %-8s %-10s %-10s %-10s %-10s %-8s\n",
-           "Vel", "Deploy", "Orig CP", "New CP", "CP Move", "Margin");
-    printf("========================================================\n");
-
-    for (int i = 0; i < num_velocities; i++)
+    while (1)
     {
-        float velocity = test_velocities[i];
+        printf("Enter velocity (m/s): ");
+        if (scanf("%63s", input) != 1)
+            break;
 
-        OpenRocketData *rocket = openrocket_lookup(velocity);
+        if (strcmp(input, "EXIT") == 0)   // was strcasecmp
+            break;
 
-        if (rocket == NULL)
-        {
-            printf(" %-8.1f  -- no matching OpenRocket data --\n", velocity);
-            continue;
-        }
+        velocity = strtof(input, NULL);
 
-        for (int j = 0; j < num_deployments; j++)
-        {
-            float deployment = test_deployments[j];
+        printf("Enter deployment (degrees): ");
+        if (scanf("%63s", input) != 1)
+            break;
 
-            float new_cp;
-            float stability = calculate_stability(rocket, deployment, &new_cp);
-            float cp_movement = new_cp - rocket->cp;
+        if (strcmp(input, "EXIT") == 0)   // was strcasecmp
+            break;
 
-            printf(" %-8.1f %-10.1f %-10.3f %-10.3f %-10.3f %-8.3f %s\n",
-                   velocity,
-                   deployment,
-                   rocket->cp,
-                   new_cp,
-                   cp_movement,
-                   stability,
-                   (stability >= 1.5f) ? "STABLE" : "UNSTABLE");
-        }
+        deployment = strtof(input, NULL);
+
+        float stability_margin;
+        int stable = get_stability_decision(velocity, deployment, &stability_margin);
+
+        printf("\n========================================\n");
+        printf("       STABILITY CALCULATION\n");
+        printf("========================================\n");
+        printf("Velocity:          %.2f m/s\n", velocity);
+        printf("Deployment:        %.2f degrees\n", deployment);
+        printf("Stability margin:  %.3f calibres\n", stability_margin);
+        printf("Status:            %s\n\n", stable ? "STABLE" : "UNSTABLE");
     }
 
-    printf("========================================================\n");
+    printf("Exiting.\n");
 
     return 0;
 }
