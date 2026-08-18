@@ -3,36 +3,41 @@
 #include <string.h>
 #include <stdlib.h>
 
-
-
-#define MAX_ROWS 1200
-
-// One row of useful OpenRocket flight data
 typedef struct
 {
-    float time;
-    float altitude;
     float velocity;
-    float angle_of_attack;
     float cp;
     float cg;
     float drag_force;
-    float drag_coefficient;
-    float air_pressure;
-    float air_density;
-    float mach;
-
-} OpenRocketData;
+} FlightPoint;
 
 const float airbrake_position = 112.0f;
 const float rocket_diameter = 14.4f;
 const float air_density_constant = 0.9428f;     // kg/m^3, from CFD
 const float rocket_reference_area = 0.016259f;  // rocket cross-sectional area, m^2
 
-// Array to hold the OpenRocket simulation
-OpenRocketData flight_data[MAX_ROWS];
+const FlightPoint flight_data[] = {
+    { 16.0611f, 148.0700f, 109.8000f, 1.3540f },
+    { 29.6923f, 152.6522f, 109.8000f, 3.1107f },
+    { 49.9778f, 153.0878f, 109.8000f, 7.7555f },
+    { 70.0527f, 153.3921f, 109.8000f, 15.1047f },
+    { 89.8388f, 154.5286f, 109.8000f, 25.3539f },
+    { 109.4693f, 153.9853f, 109.8000f, 38.5721f },
+    { 129.6832f, 154.3939f, 109.8000f, 56.2801f },
+    { 149.9462f, 155.0857f, 109.8000f, 79.3479f },
+    { 169.9826f, 155.7720f, 109.8000f, 108.2839f },
+    { 190.5818f, 155.4821f, 109.8000f, 145.7725f },
+    { 209.4175f, 156.5458f, 109.8000f, 187.5349f },
+    { 229.4816f, 157.1160f, 109.8000f, 243.1708f },
+    { 249.7206f, 158.1067f, 109.8000f, 316.1981f },
+    { 269.7059f, 158.9143f, 109.8000f, 411.6920f },
+    { 290.7387f, 159.8462f, 109.8000f, 553.5171f },
+    { 309.6873f, 160.6611f, 109.8000f, 678.3124f },
+    { 329.7954f, 161.5813f, 109.8000f, 758.1421f },
+    { 344.1556f, 162.0571f, 109.8000f, 854.7373f },
+};
 
-int flight_data_count = 0;
+const int flight_data_count = sizeof(flight_data) / sizeof(flight_data[0]);
 
 const float speeds[] = {
     0, 1, 2, 3, 4, 5, 7.5, 10,
@@ -42,7 +47,6 @@ const float speeds[] = {
 const float deployments[] = {
     10, 20, 30, 40, 50, 60, 70, 80, 90
 };
-
 
 const float cd_table[14][9] = {
     {0, 0, 0, 0, 0, 0, 0, 0, 0},
@@ -61,117 +65,8 @@ const float cd_table[14][9] = {
     {0.0182746, 0.0382504, 0.061185, 0.0856915, 0.106712, 0.1244, 0.138951, 0.152138, 0.1651}
 };
 
-
-int load_openrocket_data(const char *filename)
-{
-    FILE *file = fopen(filename, "r");
-
-    if (file == NULL)
-    {
-        printf("ERROR: Could not open OpenRocket CSV\n");
-        return 0;
-    }
-
-    char line[500];
-
-    while (fgets(line, sizeof(line), file) != NULL)
-    {
-        // OpenRocket uses # for comments, events and headers.
-        // We don't want to try to interpret those as data.
-        if (line[0] == '#')
-            continue;
-
-        // Ignore blank lines
-        if (line[0] == '\n')
-            continue;
-
-        if (flight_data_count >= MAX_ROWS)
-        {
-            printf("ERROR: Too many OpenRocket rows\n");
-            fclose(file);
-            return 0;
-        }
-
-        OpenRocketData *row = &flight_data[flight_data_count];
-
-        int result = sscanf(
-            line,
-            "%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f",
-            &row->time,
-            &row->altitude,
-            &row->velocity,
-            &row->angle_of_attack,
-            &row->cp,
-            &row->cg,
-            &row->drag_force,
-            &row->drag_coefficient,
-            &row->air_pressure,
-            &row->air_density,
-            &row->mach
-        );
-
-        // Only add the row if all 11 values were successfully read
-        if (result == 11)
-        {
-            flight_data_count++;
-        }
-    }
-
-    fclose(file);
-
-    printf("Loaded %d OpenRocket data points\n", flight_data_count);
-
-    return 1;
-}
-
-
-OpenRocketData *openrocket_lookup(float velocity)
-{
-    if (flight_data_count == 0)
-    {
-        return NULL;
-    }
-
-    int best_index = -1;
-    float smallest_difference = 999999.0f;
-
-    for (int i = 0; i < flight_data_count; i++)
-    {
-        // Ignore rows where OpenRocket hasn't calculated a CP
-        // (these occur before launch / after apogee)
-        if (isnan(flight_data[i].cp))
-            continue;
-
-        float difference = fabsf(
-            flight_data[i].velocity - velocity
-        );
-
-        if (difference < smallest_difference)
-        {
-            smallest_difference = difference;
-            best_index = i;
-        }
-    }
-
-    if (best_index == -1)
-    {
-        return NULL;
-    }
-
-    return &flight_data[best_index];
-}
-
-
-
 float airbrake_cd_lookup(float velocity, float deployment)
 {
-    // ---------------------------------------------------------
-    // 1. Keep the inputs within the range of our CFD data
-    // ---------------------------------------------------------
-    // CFD data only covers:
-    // Velocity:   0 to 373.4 m/s
-    // Deployment: 10 to 90 degrees
-
     if (velocity < speeds[0])
         velocity = speeds[0];
 
@@ -183,16 +78,6 @@ float airbrake_cd_lookup(float velocity, float deployment)
 
     if (deployment > deployments[8])
         deployment = deployments[8];
-
-
-    // ---------------------------------------------------------
-    // 2. Find the two velocity values surrounding our input
-    // ---------------------------------------------------------
-    // For example, if velocity = 50 m/s:
-    //
-    // 49.8 m/s < 50 m/s < 99.6 m/s
-    //
-    // Therefore we need the Cd values at 49.8 and 99.6 m/s.
 
     int velocity_index = 0;
 
@@ -207,16 +92,6 @@ float airbrake_cd_lookup(float velocity, float deployment)
 
     int v1 = velocity_index;
     int v2 = velocity_index + 1;
-
-
-    // ---------------------------------------------------------
-    // 3. Find the two deployment values surrounding our input
-    // ---------------------------------------------------------
-    // For example, if deployment = 55 degrees:
-    //
-    // 50 degrees < 55 degrees < 60 degrees
-    //
-    // So we need the Cd values at 50 and 60 degrees.
 
     int deployment_index = 0;
 
@@ -233,29 +108,10 @@ float airbrake_cd_lookup(float velocity, float deployment)
     int d1 = deployment_index;
     int d2 = deployment_index + 1;
 
-
-    // ---------------------------------------------------------
-    // 4. Get the four surrounding Cd values
-    // ---------------------------------------------------------
-    //
-    //             d1          d2
-    //              |           |
-    // v1 -------- Cd11 ------- Cd12
-    //              |           |
-    // v2 -------- Cd21 ------- Cd22
-    //
-    // These four values surround the velocity/deployment
-    // combination that we're looking for.
-
     float cd11 = cd_table[v1][d1];
     float cd12 = cd_table[v1][d2];
     float cd21 = cd_table[v2][d1];
     float cd22 = cd_table[v2][d2];
-
-
-    // ---------------------------------------------------------
-    // 5. Interpolate in the deployment direction
-    // ---------------------------------------------------------
 
     float deployment_fraction =
         (deployment - deployments[d1]) /
@@ -267,11 +123,6 @@ float airbrake_cd_lookup(float velocity, float deployment)
     float cd_at_v2 =
         cd21 + (cd22 - cd21) * deployment_fraction;
 
-
-    // ---------------------------------------------------------
-    // 6. Interpolate in the velocity direction
-    // ---------------------------------------------------------
-
     float velocity_fraction =
         (velocity - speeds[v1]) /
         (speeds[v2] - speeds[v1]);
@@ -279,64 +130,8 @@ float airbrake_cd_lookup(float velocity, float deployment)
     float final_cd =
         cd_at_v1 + (cd_at_v2 - cd_at_v1) * velocity_fraction;
 
-
-    // Return the estimated airbrake drag coefficient
     return final_cd;
 }
-
-
-const float area_deployments[] = {
-    10, 20, 30, 40, 50, 60, 70, 80, 90
-};
-
-const float airbrake_areas[] = {
-    0.000388,
-    0.000734,
-    0.001043,
-    0.001316,
-    0.001556,
-    0.001766,
-    0.001948,
-    0.002106,
-    0.002240
-};
-
-
-float airbrake_area_lookup(float deployment)
-{
-    // Keep deployment within the range of our area data
-    if (deployment < area_deployments[0])
-        deployment = area_deployments[0];
-
-    if (deployment > area_deployments[8])
-        deployment = area_deployments[8];
-
-    // Find the two deployment angles surrounding our input
-    int index = 0;
-
-    for (int i = 0; i < 8; i++)
-    {
-        if (deployment >= area_deployments[i] &&
-            deployment <= area_deployments[i + 1])
-        {
-            index = i;
-            break;
-        }
-    }
-
-    // Get the two surrounding area values
-    float area1 = airbrake_areas[index];
-    float area2 = airbrake_areas[index + 1];
-
-    // Calculate how far between the two deployment angles we are
-    float fraction =
-        (deployment - area_deployments[index]) /
-        (area_deployments[index + 1] - area_deployments[index]);
-
-    // Linearly interpolate the area
-    return area1 + (area2 - area1) * fraction;
-}
-
 
 float airbrake_drag(float velocity, float deployment)
 {
@@ -351,8 +146,37 @@ float airbrake_drag(float velocity, float deployment)
     return single_airbrake_drag * 3.0f;
 }
 
+const FlightPoint *openrocket_lookup(float velocity)
+{
+    if (flight_data_count == 0)
+    {
+        return NULL;
+    }
+
+    int best_index = -1;
+    float smallest_difference = 999999.0f;
+
+    for (int i = 0; i < flight_data_count; i++)
+    {
+        float difference = fabsf(flight_data[i].velocity - velocity);
+
+        if (difference < smallest_difference)
+        {
+            smallest_difference = difference;
+            best_index = i;
+        }
+    }
+
+    if (best_index == -1)
+    {
+        return NULL;
+    }
+
+    return &flight_data[best_index];
+}
+
 float calculate_stability(
-    OpenRocketData *rocket,
+    const FlightPoint *rocket,
     float deployment,
     float *out_new_cp)
 {
@@ -374,11 +198,12 @@ float calculate_stability(
 
     return stability;
 }
-int stability_check(OpenRocketData *rocket, float deployment)
+
+int stability_check(const FlightPoint *rocket, float deployment)
 {
     const float stability_threshold = 1.5f;
 
-    float stability = calculate_stability(rocket, deployment, NULL);  // add NULL here
+    float stability = calculate_stability(rocket, deployment, NULL);
 
     if (stability >= stability_threshold)
     {
@@ -394,7 +219,7 @@ int get_stability_decision(
     float *out_stability_margin
 )
 {
-    OpenRocketData *rocket = openrocket_lookup(velocity);
+    const FlightPoint *rocket = openrocket_lookup(velocity);
 
     if (rocket == NULL)
     {
@@ -408,16 +233,11 @@ int get_stability_decision(
     if (out_stability_margin != NULL)
         *out_stability_margin = stability;
 
-    return stability >= 1.5f;
+    return stability >= 1.7f;
 }
 
 int main(void)
 {
-    if (!load_openrocket_data("../csv_data/Comprocket data.csv"))
-    {
-        return 1;
-    }
-
     char input[64];
     float velocity;
     float deployment;
@@ -430,7 +250,7 @@ int main(void)
         if (scanf("%63s", input) != 1)
             break;
 
-        if (strcmp(input, "EXIT") == 0)   // was strcasecmp
+        if (strcmp(input, "EXIT") == 0)
             break;
 
         velocity = strtof(input, NULL);
@@ -439,7 +259,7 @@ int main(void)
         if (scanf("%63s", input) != 1)
             break;
 
-        if (strcmp(input, "EXIT") == 0)   // was strcasecmp
+        if (strcmp(input, "EXIT") == 0)
             break;
 
         deployment = strtof(input, NULL);
