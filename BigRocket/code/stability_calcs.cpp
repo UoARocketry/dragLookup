@@ -1,15 +1,15 @@
-#include <stdio.h>
 #include <math.h>
-#include <string.h>
-#include <stdlib.h>
+#include "stability.h"
 
-typedef struct
+namespace {
+
+struct FlightPoint
 {
     float velocity;
     float cp;
     float cg;
     float drag_force;
-} FlightPoint;
+};
 
 const float airbrake_position = 112.0f;
 const float rocket_diameter = 14.4f;
@@ -150,7 +150,7 @@ const FlightPoint *openrocket_lookup(float velocity)
 {
     if (flight_data_count == 0)
     {
-        return NULL;
+        return nullptr;
     }
 
     int best_index = -1;
@@ -169,7 +169,7 @@ const FlightPoint *openrocket_lookup(float velocity)
 
     if (best_index == -1)
     {
-        return NULL;
+        return nullptr;
     }
 
     return &flight_data[best_index];
@@ -193,25 +193,13 @@ float calculate_stability(
     float stability =
         (new_cp - rocket->cg) / rocket_diameter;
 
-    if (out_new_cp != NULL)
+    if (out_new_cp != nullptr)
         *out_new_cp = new_cp;
 
     return stability;
 }
 
-int stability_check(const FlightPoint *rocket, float deployment)
-{
-    const float stability_threshold = 1.5f;
-
-    float stability = calculate_stability(rocket, deployment, NULL);
-
-    if (stability >= stability_threshold)
-    {
-        return 1;
-    }
-
-    return 0;
-}
+}  // namespace
 
 int get_stability_decision(
     float velocity,
@@ -221,62 +209,17 @@ int get_stability_decision(
 {
     const FlightPoint *rocket = openrocket_lookup(velocity);
 
-    if (rocket == NULL)
+    if (rocket == nullptr)
     {
-        if (out_stability_margin != NULL)
+        if (out_stability_margin != nullptr)
             *out_stability_margin = 0.0f;
         return 0;
     }
 
-    float stability = calculate_stability(rocket, deployment, NULL);
+    float stability = calculate_stability(rocket, deployment, nullptr);
 
-    if (out_stability_margin != NULL)
+    if (out_stability_margin != nullptr)
         *out_stability_margin = stability;
 
     return stability >= 1.7f;
-}
-
-int main(void)
-{
-    char input[64];
-    float velocity;
-    float deployment;
-
-    printf("Type EXIT at any prompt to quit.\n\n");
-
-    while (1)
-    {
-        printf("Enter velocity (m/s): ");
-        if (scanf("%63s", input) != 1)
-            break;
-
-        if (strcmp(input, "EXIT") == 0)
-            break;
-
-        velocity = strtof(input, NULL);
-
-        printf("Enter deployment (degrees): ");
-        if (scanf("%63s", input) != 1)
-            break;
-
-        if (strcmp(input, "EXIT") == 0)
-            break;
-
-        deployment = strtof(input, NULL);
-
-        float stability_margin;
-        int stable = get_stability_decision(velocity, deployment, &stability_margin);
-
-        printf("\n========================================\n");
-        printf("       STABILITY CALCULATION\n");
-        printf("========================================\n");
-        printf("Velocity:          %.2f m/s\n", velocity);
-        printf("Deployment:        %.2f degrees\n", deployment);
-        printf("Stability margin:  %.3f calibres\n", stability_margin);
-        printf("Status:            %s\n\n", stable ? "STABLE" : "UNSTABLE");
-    }
-
-    printf("Exiting.\n");
-
-    return 0;
 }
