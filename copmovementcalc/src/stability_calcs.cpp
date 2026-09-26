@@ -13,7 +13,7 @@ struct FlightPoint
 
 const float airbrake_position = 112.0f;
 const float rocket_diameter = 14.4f;
-const float air_density_constant = 0.9428f;     // kg/m^3, from CFD
+const float air_density_constant = 0.9428f;      // kg/m^3, from CFD
 const float rocket_reference_area = 0.016259f;  // rocket cross-sectional area, m^2
 
 const FlightPoint flight_data[] = {
